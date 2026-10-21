@@ -1,5 +1,6 @@
-"""SimSpeak step 2: mock chat + manual form editing of a shared Pydantic draft."""
+import os
 
+import httpx
 import streamlit as st
 from pydantic import ValidationError
 
@@ -7,24 +8,25 @@ from simspeak.chat_backend import send_message
 from simspeak.form import parse_form
 from simspeak.models import SimulationSpec, generation_issues
 
+API_BASE_URL = os.getenv("SIMSPEAK_API_URL", "http://localhost:8000").rstrip("/")
+
 st.set_page_config(page_title="SimSpeak", page_icon="⚛️", layout="wide")
-st.title("SimSpeak")
 st.markdown(
     """
     <style>
-        [data-testid="stSidebar"] {
-            width: 230px !important;
-            min-width: 230px !important;
-            max-width: 230px !important;
-        }
-
-        [data-testid="stSidebar"] > div:first-child {
-            width: 230px !important;
-        }
+    [data-testid="stSidebar"] {
+        width: 230px !important;
+        min-width: 230px !important;
+        max-width: 230px !important;
+    }
+    [data-testid="stSidebar"] > div:first-child {
+        width: 230px !important;
+    }
     </style>
     """,
     unsafe_allow_html=True,
 )
+st.title("SimSpeak")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -33,21 +35,21 @@ if "spec" not in st.session_state:
 
 with st.sidebar:
     st.subheader("Controls")
-
     if st.button(
         "Clear chat",
-        help="Delete the current conversation. Simulation fields are preserved.",
+        help="Remove chat messages; keep simulation fields.",
         use_container_width=True,
     ):
         st.session_state.messages = []
         st.rerun()
-
     if st.button(
         "Reset fields",
-        help="Restore the default simulation specification. Chat history is preserved.",
+        help="Restore default simulation fields; keep chat messages.",
         use_container_width=True,
     ):
         st.session_state.spec = SimulationSpec().model_dump(mode="json")
+        # A previously published ID refers to an older snapshot.
+        st.session_state.pop("published_spec_id", None)
         st.rerun()
 
 spec = SimulationSpec.model_validate(st.session_state.spec)
@@ -56,7 +58,7 @@ chat_col, form_col = st.columns([1.15, 1], gap="large")
 with form_col:
     st.subheader("Simulation fields")
     st.caption(
-        "Edit values manually and select **Apply changes**. Empty numeric fields are allowed in a draft."
+        "Edit values and select **Apply changes**. Empty numeric fields are allowed."
     )
     structures = ["", "fcc", "bcc", "diamond"]
     with st.form("simulation_form"):
@@ -98,12 +100,9 @@ with form_col:
             index=["quantum_espresso", "gpaw"].index(spec.engine),
         )
         _, button_col = st.columns([2, 1])
-
         with button_col:
             submitted = st.form_submit_button(
-                "Apply changes",
-                type="primary",
-                use_container_width=True,
+                "Apply changes", type="primary", use_container_width=True
             )
 
     if submitted:
@@ -124,31 +123,51 @@ with form_col:
             st.error(f"Changes not saved: {exc}")
         else:
             st.session_state.spec = candidate.model_dump(mode="json")
-            st.success("Simulation draft updated.")
+            st.session_state.pop("published_spec_id", None)
             spec = candidate
+            st.success("Simulation draft updated.")
 
-    with st.expander(
-        "Current specification (JSON)",
-        expanded=False,
-    ):
+    with st.expander("Current specification (JSON)", expanded=False):
         st.caption(
-            "This is the structured representation of your simulation, "
-            "validated using Pydantic. It will be used to generate "
-            "simulation input files."
+            "Validated Pydantic draft used to share a simulation specification "
+            "with other tools."
         )
         st.json(spec.model_dump(mode="json"))
+
     issues = generation_issues(spec)
     if issues:
         st.info("Not ready for file generation yet: " + "; ".join(issues))
     else:
-        st.success(
-            "Required draft fields are filled. Input generation will be added later."
-        )
+        st.success("Required draft fields are filled. Input generation comes later.")
+
+    st.divider()
+    if st.button(
+        "Publish specification",
+        help="Save a snapshot to the FastAPI backend for other applications to retrieve.",
+        use_container_width=True,
+    ):
+        try:
+            response = httpx.post(
+                f"{API_BASE_URL}/specs",
+                json=spec.model_dump(mode="json"),
+                timeout=10.0,
+            )
+            response.raise_for_status()
+            published = response.json()
+            st.session_state.published_spec_id = published["id"]
+            st.success("Specification snapshot published.")
+        except (httpx.HTTPError, ValueError, KeyError) as exc:
+            st.error(f"Could not publish specification: {exc}")
+
+    if spec_id := st.session_state.get("published_spec_id"):
+        st.caption("Latest published snapshot (read-only):")
+        st.code(f"{API_BASE_URL}/specs/{spec_id}", language="text")
 
 with chat_col:
     st.subheader("Chat")
     st.caption(
-        "Messages go to `simspeak.chat_backend.send_message()` (mock for now). Chat does not edit fields yet."
+        "Messages go to `simspeak.chat_backend.send_message()` (mock for now). "
+        "Chat does not edit fields yet."
     )
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
