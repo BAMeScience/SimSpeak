@@ -1,44 +1,25 @@
-# SimSpeak
+# SimSpeak — minimal universal simulation draft
 
-Run:
+This branch keeps the Streamlit UI and mock chat backend, replacing the DFT-only schema with a minimal four-field Pydantic draft (`structure`, `method`, `calculator`, `task`). It supports classical MD and ground-state DFT **validation only**. No ASE integration, engine input generation, or execution is implemented.
+
+## Run
+
 ```bash
-uv venv
-. .venv/bin/activate
+uv sync --extra dev
+uv run pytest -q
+uv run streamlit run app.py
 ```
 
-And:
-```bash
-uv sync
-```
+The Streamlit form edits a draft manually; no scientific defaults are applied. Calculator and task parameters are JSON objects. The validator produces `VALID`, `INCOMPLETE`, or `INVALID` plus structured diagnostics. `VALID` is only a minimal registry check, **not** a guarantee that a simulation can run.
 
-Make sure to download [Ollama](https://ollama.com/) and pull a small model following its [docs](https://docs.ollama.com/) page.
+## LLM evidence boundary
 
-Example implementation:
+The chat backend remains a mock and **does not populate the form**. Future LLM integrations should call `validate(spec, source_text=original_prompt, evidence={"method": "classical MD", ...})` and never set `user_edited=True`. That flag is reserved for the manually edited UI. Evidence is checked against verbatim substrings of the original prompt, with limited lexical value matching; this is intentionally conservative and **not a comprehensive semantic entailment check**. Avoid treating the current evidence checker as a proof of scientific correctness.
 
-```python
-from ollama import Client
-from pydantic import BaseModel
+## Design notes
 
-
-class Draft(BaseModel):
-    sample_name: str | None
-    material: str | None
-
-
-client = Client(host="http://127.0.0.1:11434")
-response = client.chat(
-    model="qwen3:4b",
-    messages=[{"role": "user", "content":
-        "Extract facts; use null if missing. "
-        "Sample S-001 is NiO."}],
-    format=Draft.model_json_schema(),
-    think=False,
-    options={"temperature": 0},
-)
-
-draft = Draft.model_validate_json(
-    response.message.content
-)
-
-print(draft.model_dump())
-```
+- The four-field model is intentionally permissive for incomplete drafts and forbids unknown top-level fields.
+- The deterministic validator uses a deliberately small allowlist for calculator and task parameters. Expand it only with documented rules.
+- `structure.source` is a reference string; no file existence or content validation occurs yet.
+- `calculator.name` is user-supplied; it is not yet checked against a capability registry.
+- The application has no implicit PBE, engine, structure, or timestep defaults.
