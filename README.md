@@ -42,3 +42,58 @@ draft = Draft.model_validate_json(
 
 print(draft.model_dump())
 ```
+
+| Phase                     | Components                                                        | Expected result |
+| ---                       | ---                                                               | --- |
+| **1. Foundation**         | Repository, Pydantic schema, ASE structure builder, Streamlit UI  | Enter parameters manually and generate a silicon structure |
+| **2. Input generation**   | Quantum ESPRESSO and GPAW adapters                                | Generate and download simulation input files |
+| **3. LLM integration**    | Ollama client, extraction prompts, structured outputs             | Convert natural language into the schema |
+| **4. Memory**             | SQLite, conversation management, specification revisions          | Modify experiments through successive messages |
+| **5. Integration**        | Error handling, validation, tests, UI improvements                | Fully functional local demo |
+
+
+```text
+                       SimSpeak
+                          │
+                          ▼
+                ┌───────────────────┐
+                │    STREAMLIT      │
+                │                   │
+                │ Chat interface    │
+                │ Editable form     │
+                │ JSON preview      │
+                │ Generated files   │
+                └─────────┬─────────┘
+                          │
+                          ▼
+                ┌───────────────────┐
+                │ SIMULATION SERVICE│
+                │                   │
+                │ Create            │
+                │ Update            │
+                │ Validate          │
+                │ Generate          │
+                └─────────┬─────────┘
+                          │
+             ┌────────────┼────────────┐
+             │            │            │
+             ▼            ▼            ▼
+        ┌─────────┐ ┌─────────┐ ┌─────────┐
+        │ OLLAMA  │ │PYDANTIC │ │ MEMORY  │
+        │         │ │         │ │         │
+        │ Text →  │ │ Schema  │ │ SQLite  │
+        │ Changes │ │Validate │ │History  │
+        └─────────┘ └─────────┘ └─────────┘
+                          │
+                          ▼
+                ┌───────────────────┐
+                │  ASE / GENERATORS │
+                │                   │
+                │ Quantum ESPRESSO  │
+                │ GPAW              │
+                │ Future: VASP, MD  │
+                └─────────┬─────────┘
+                          │
+                          ▼
+                   GENERATED FILES
+```
