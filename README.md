@@ -1,19 +1,41 @@
 # SimSpeak
 
-Run:
+## Development
+
+### Requirements
+
+- Python 3.14
+- uv
+- Make sure to download [Ollama](https://ollama.com/) and pull a small model following its [docs](https://docs.ollama.com/) page.
+
+### Installation
+
+Clone the repository:
+
 ```bash
-uv venv
-. .venv/bin/activate
+git clone https://github.com/BAMeScience/SimSpeak.git
+cd SimSpeak
+git checkout app-jmp
 ```
 
-And:
+Install the project and development dependencies:
 ```bash
-uv sync
+uv sync --extra dev
 ```
 
-Make sure to download [Ollama](https://ollama.com/) and pull a small model following its [docs](https://docs.ollama.com/) page.
+Run Streamlit
+```bash
+uv run streamlit run app.py
+```
 
-Example implementation:
+Open http://localhost:8501.
+
+Run tests
+```bash
+uv run pytest -v
+```
+
+### Example implementation
 
 ```python
 from ollama import Client
@@ -28,29 +50,21 @@ class Draft(BaseModel):
 client = Client(host="http://127.0.0.1:11434")
 response = client.chat(
     model="qwen3:4b",
-    messages=[{"role": "user", "content":
-        "Extract facts; use null if missing. "
-        "Sample S-001 is NiO."}],
+    messages=[
+        {
+            "role": "user",
+            "content": "Extract facts; use null if missing. Sample S-001 is NiO.",
+        }
+    ],
     format=Draft.model_json_schema(),
     think=False,
     options={"temperature": 0},
 )
 
-draft = Draft.model_validate_json(
-    response.message.content
-)
+draft = Draft.model_validate_json(response.message.content)
 
 print(draft.model_dump())
 ```
-
-| Phase                     | Components                                                        | Expected result |
-| ---                       | ---                                                               | --- |
-| **1. Foundation**         | Repository, Pydantic schema, ASE structure builder, Streamlit UI  | Enter parameters manually and generate a silicon structure |
-| **2. Input generation**   | Quantum ESPRESSO and GPAW adapters                                | Generate and download simulation input files |
-| **3. LLM integration**    | Ollama client, extraction prompts, structured outputs             | Convert natural language into the schema |
-| **4. Memory**             | SQLite, conversation management, specification revisions          | Modify experiments through successive messages |
-| **5. Integration**        | Error handling, validation, tests, UI improvements                | Fully functional local demo |
-
 
 ```text
                        SimSpeak

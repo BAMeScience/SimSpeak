@@ -9,18 +9,46 @@ from simspeak.models import SimulationSpec, generation_issues
 
 st.set_page_config(page_title="SimSpeak", page_icon="⚛️", layout="wide")
 st.title("SimSpeak")
+st.markdown(
+    """
+    <style>
+        [data-testid="stSidebar"] {
+            width: 230px !important;
+            min-width: 230px !important;
+            max-width: 230px !important;
+        }
+
+        [data-testid="stSidebar"] > div:first-child {
+            width: 230px !important;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "spec" not in st.session_state:
     st.session_state.spec = SimulationSpec().model_dump(mode="json")
 
-if st.sidebar.button("New conversation (clear chat only)"):
-    st.session_state.messages = []
-    st.rerun()
-if st.sidebar.button("Reset simulation fields"):
-    st.session_state.spec = SimulationSpec().model_dump(mode="json")
-    st.rerun()
+with st.sidebar:
+    st.subheader("Controls")
+
+    if st.button(
+        "Clear chat",
+        help="Delete the current conversation. Simulation fields are preserved.",
+        use_container_width=True,
+    ):
+        st.session_state.messages = []
+        st.rerun()
+
+    if st.button(
+        "Reset fields",
+        help="Restore the default simulation specification. Chat history is preserved.",
+        use_container_width=True,
+    ):
+        st.session_state.spec = SimulationSpec().model_dump(mode="json")
+        st.rerun()
 
 spec = SimulationSpec.model_validate(st.session_state.spec)
 chat_col, form_col = st.columns([1.15, 1], gap="large")
@@ -69,7 +97,14 @@ with form_col:
             ["quantum_espresso", "gpaw"],
             index=["quantum_espresso", "gpaw"].index(spec.engine),
         )
-        submitted = st.form_submit_button("Apply changes", type="primary")
+        _, button_col = st.columns([2, 1])
+
+        with button_col:
+            submitted = st.form_submit_button(
+                "Apply changes",
+                type="primary",
+                use_container_width=True,
+            )
 
     if submitted:
         try:
@@ -92,7 +127,15 @@ with form_col:
             st.success("Simulation draft updated.")
             spec = candidate
 
-    with st.expander("Current specification (JSON)", expanded=True):
+    with st.expander(
+        "Current specification (JSON)",
+        expanded=False,
+    ):
+        st.caption(
+            "This is the structured representation of your simulation, "
+            "validated using Pydantic. It will be used to generate "
+            "simulation input files."
+        )
         st.json(spec.model_dump(mode="json"))
     issues = generation_issues(spec)
     if issues:

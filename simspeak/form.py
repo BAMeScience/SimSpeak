@@ -1,5 +1,3 @@
-"""Convert form text into a Pydantic-validated draft (no Streamlit dependency)."""
-
 from pydantic import ValidationError
 
 from simspeak.models import SimulationSpec
