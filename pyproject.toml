@@ -1,0 +1,11 @@
+[project]
+name = "simspeak"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "ase>=3.29.0",
+    "ollama>=0.6.3",
+    "pydantic>=2.14.1",
+]
