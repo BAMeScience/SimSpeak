@@ -123,7 +123,15 @@ def validate(spec: SimulationSpec, *, source_text: str | None = None,
                 literal = str(obj).lower()
                 aliases = {'classical_md': ['classical md', 'molecular dynamics'], 'dft': ['dft', 'density functional theory'], 'md': ['md', 'molecular dynamics'], 'single_point': ['single point', 'single-point'], 'optimize': ['optimize', 'optimization', 'relaxation']}
                 accepted = [literal] + aliases.get(literal, [])
-                if not any(token in quote.lower() for token in accepted):
+                # Normalized aliases and unit conversions must be verified by
+                # re-parsing the exact quote, not by matching the canonical ID.
+                if path in ('calculator.parameters.potential', 'task.parameters.duration_ps'):
+                    from simspeak.extraction import extract_verified, _leaves
+                    verified_leaves = dict(_leaves(extract_verified(quote).patch))
+                    supported = verified_leaves.get(path) == obj
+                else:
+                    supported = any(token in quote.lower() for token in accepted)
+                if not supported:
                     add('UNVERIFIED_VALUE', path, 'Source quote does not support the declared value')
     invalid = any(i.code not in ('MISSING',) for i in issues)
     return Report('INVALID' if invalid else 'INCOMPLETE' if issues else 'VALID', issues)
