@@ -1,0 +1,15 @@
+{
+  "lattice_constant_ang": 5.4,
+  "cells_per_axis": 4,
+  "epsilon_kcal_mol": 0.238,
+  "sigma_ang": 3.405,
+  "cutoff_ang": 8.5,
+  "temperature_k": 300,
+  "pressure_bar": 1,
+  "timestep_fs": 2,
+  "steps": 20000,
+  "tdamp_fs": 200,
+  "pdamp_fs": 2000,
+  "random_seed": 12345,
+  "mass_g_mol": 39.948
+}

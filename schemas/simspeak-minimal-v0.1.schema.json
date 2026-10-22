@@ -1,0 +1,106 @@
+{
+  "$defs": {
+    "Calculator": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "parameters": {
+          "additionalProperties": true,
+          "title": "Parameters",
+          "type": "object"
+        }
+      },
+      "title": "Calculator",
+      "type": "object"
+    },
+    "Structure": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source"
+        }
+      },
+      "title": "Structure",
+      "type": "object"
+    },
+    "Task": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "anyOf": [
+            {
+              "enum": [
+                "single_point",
+                "optimize",
+                "md"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Type"
+        },
+        "parameters": {
+          "additionalProperties": true,
+          "title": "Parameters",
+          "type": "object"
+        }
+      },
+      "title": "Task",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "structure": {
+      "$ref": "#/$defs/Structure"
+    },
+    "method": {
+      "anyOf": [
+        {
+          "enum": [
+            "classical_md",
+            "dft"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Method"
+    },
+    "calculator": {
+      "$ref": "#/$defs/Calculator"
+    },
+    "task": {
+      "$ref": "#/$defs/Task"
+    }
+  },
+  "title": "SimulationSpec",
+  "type": "object"
+}
