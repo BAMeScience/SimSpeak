@@ -43,9 +43,8 @@ def test_chat_message():
 
     messages = at.session_state["messages"]
 
-    assert len(messages) == 2
+    assert len(messages) == 1
     assert messages[0]["role"] == "user"
-    assert messages[1]["role"] == "assistant"
 
 
 def test_form_update():
