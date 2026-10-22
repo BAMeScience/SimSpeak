@@ -3,12 +3,14 @@ import json
 import streamlit as st
 from pydantic import ValidationError
 from simspeak.chat_backend import send_message
-from simspeak.extraction import extract, merge_spec
+from simspeak.revisions import apply_chat_revision
 from simspeak.models import SimulationSpec
 from simspeak.validation import validate
 
 st.set_page_config(page_title='SimSpeak', page_icon='⚛️', layout='wide')
 st.title('SimSpeak')
+if 'spec_undo' not in st.session_state:
+    st.session_state.spec_undo = []
 if 'messages' not in st.session_state:
     st.session_state.messages = []
 if 'spec' not in st.session_state:
@@ -24,7 +26,13 @@ with st.sidebar:
     if st.button('Clear chat', use_container_width=True):
         st.session_state.messages = []
         st.rerun()
+    if st.button('Undo last change', use_container_width=True, disabled=not st.session_state.spec_undo):
+        st.session_state.spec = st.session_state.spec_undo.pop()
+        st.session_state.spec_user_edited = True
+        st.session_state.extraction_evidence = {}
+        st.rerun()
     if st.button('Reset fields', use_container_width=True):
+        st.session_state.spec_undo = []
         st.session_state.spec = SimulationSpec().model_dump(mode='json')
         st.session_state.spec_user_edited = False
         st.session_state.extraction_evidence = {}
@@ -140,6 +148,7 @@ with form_col:
         except (ValueError, ValidationError, json.JSONDecodeError) as exc:
             st.error(f'Changes not saved: {exc}')
         else:
+            st.session_state.spec_undo.append(st.session_state.spec.copy())
             st.session_state.spec = candidate.model_dump(mode='json')
             st.session_state.spec_user_edited = True
             st.session_state.extraction_evidence = {}  # Manual edits supersede previous extraction evidence.
@@ -155,6 +164,32 @@ with form_col:
             st.write(f'- `{d.code}` at `{d.path}`: {d.message}')
     else:
         st.caption('Minimal schema and registry checks passed. Not an execution guarantee.')
+    st.subheader('Generate engine input files')
+    st.caption('Quantum ESPRESSO preview: DFT single-point only. No simulation execution or scientific defaults.')
+    engine = st.selectbox('Target engine for generation', ['Quantum ESPRESSO'])
+    uploaded = st.file_uploader('Upload the structure file named in structure.source', type=['cif', 'xyz', 'vasp', 'poscar'])
+    generation_mode = st.radio('Generation mode', ['Template (allow missing parameters)', 'Strict (require complete parameters)'])
+    if st.button('Generate QE input ZIP'):
+        from simspeak.qe_generator import GenerationBlocked, generate_qe
+        try:
+            if uploaded is None:
+                raise GenerationBlocked('Upload the structure file first')
+            if generation_mode.startswith('Template'):
+                from simspeak.qe_templates import generate_qe_template
+                package = generate_qe_template(spec, uploaded.getvalue(), filename=uploaded.name)
+            else:
+                package = generate_qe(spec, uploaded.getvalue(), filename=uploaded.name)
+        except GenerationBlocked as exc:
+            st.error(str(exc))
+        else:
+            st.session_state.qe_package = package.content
+            st.session_state.qe_spec = spec.model_dump(mode='json')
+            st.success('Input files generated; no simulation was run.')
+    if st.session_state.get('qe_package') is not None:
+        if st.session_state.get('qe_spec') == spec.model_dump(mode='json'):
+            st.download_button('Download QE input ZIP', st.session_state.qe_package, file_name='simspeak-qe-inputs.zip', mime='application/zip')
+        else:
+            st.warning('Specification changed since generation. Generate again.')
     with st.expander('Verified extraction evidence'):
         st.json(st.session_state.extraction_evidence)
         for note in st.session_state.extraction_notes:
@@ -174,20 +209,23 @@ with chat_col:
         with st.chat_message('user'):
             st.markdown(prompt)
         try:
-            result = extract(prompt, use_ollama=use_ollama)
-            candidate = merge_spec(SimulationSpec.model_validate(st.session_state.spec), result.patch)
+            candidate, changes, notes = apply_chat_revision(SimulationSpec.model_validate(st.session_state.spec), prompt, use_ollama=use_ollama)
+            if changes:
+                st.session_state.spec_undo.append(st.session_state.spec.copy())
             st.session_state.spec = candidate.model_dump(mode='json')
-            st.session_state.extraction_evidence.update(result.evidence)
-            st.session_state.extraction_notes = result.notes
+            st.session_state.extraction_evidence = {p: prompt for p, _, _ in changes}
+            st.session_state.extraction_notes = notes
             # Every extracted value has already passed the deterministic allowlist.
             # User-edited=True avoids the legacy all-or-nothing evidence validator;
             # provenance is checked BEFORE the merge and retained in session state.
             st.session_state.spec_user_edited = True
             report = validate(candidate, user_edited=True)
-            count = len(result.evidence)
+            count = len(changes)
             reply = f'Extracted {count} verified field(s). Validation: **{report.status}**.'
-            if result.notes:
-                reply += '\n\n' + '\n'.join('- ' + note for note in result.notes)
+            if changes:
+                reply += '\n\n**Changes:** ' + ', '.join(f'`{p}`: {old!r} → {new!r}' for p, old, new in changes)
+            if notes:
+                reply += '\n\n' + '\n'.join('- ' + note for note in notes)
             if report.diagnostics:
                 reply += '\n\n**Validation findings:**\n' + '\n'.join(
                     f'- `{d.code}` `{d.path}`: {d.message}' for d in report.diagnostics

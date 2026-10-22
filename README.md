@@ -49,3 +49,32 @@ compatibility, and availability are **not** checked in v0.1.
 Standalone chat turns such as `Use OPLS-AA force field`, `Duration is 10 ps`,
 and `Run for 2 ns` are recognized without repeating the MD method. Durations
 are normalized to ps. Unspecified values remain absent.
+
+## ASE Quantum ESPRESSO input generation (experimental)
+
+The **Generate engine input files** section adds a first, deliberately narrow ASE
+adapter for **periodic DFT single-point** calculations with a plane-wave basis.
+Upload the structure file matching `structure.source` and select **Generate QE
+input ZIP**. The download includes `pw.in`, the original `spec.json`, a
+`generation_report.json`, and the structure file. It does **not** run QE.
+
+The adapter requires explicitly specified XC, plane-wave cutoff in eV,
+three-dimensional k-point mesh, and one pseudopotential filename for every
+chemical element. It converts cutoff from eV to Ry and writes `pw.in` through
+`ase.io.espresso.write_espresso_in`. No pseudopotential files are provided or
+validated. Geometry optimization, MD, nonperiodic systems, localized basis,
+and other engines are blocked, not guessed. The engine is a generation-time
+selection and does not alter the universal four-field schema.
+
+**Important:** This is a syntax-generation proof of concept, not a fully
+reproducible or scientifically validated input. ASE/QE may introduce defaults;
+users must inspect the generated file and supply compatible pseudopotentials,
+charge/spin, occupations, and convergence settings as appropriate. No claim is
+made that the resulting input is ready to execute.
+
+## Template generation and chat revisions
+
+- In **Generate engine input files**, select **Template (allow missing parameters)** to create a Quantum ESPRESSO `pw.in` template using ASE to read a periodic structure. Missing XC, kinetic-energy cutoff, k-point grid and pseudopotential filenames are written as `__REQUIRED_...__` placeholders. A `generation_report.json` lists unresolved paths. The template is **not runnable**; ASE is required for structure parsing.
+- **Strict** mode retains the earlier fully specified QE writer. Both modes are currently restricted to periodic DFT single-point calculations. Engine selection is not added to the universal four-field schema.
+- Chat can now accept explicit changes (`Actually use PBEsol instead`, `Change PBE to PBEsol`), clears (`Clear the XC functional`), and **Undo last change**. Conflicting new values without an explicit revision request are not applied. Each accepted edit records its prior state for undo.
+- No pseudopotential files are downloaded or selected automatically; no simulation is executed. Template placeholders are intentionally not executable QE syntax.
