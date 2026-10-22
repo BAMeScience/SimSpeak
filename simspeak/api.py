@@ -13,7 +13,8 @@ app = FastAPI(
     version="0.1.0",
 )
 
-DB_PATH = Path("simspeak.db")
+DB_PATH = Path("data/simspeak.db")
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 
 class SpecResponse(BaseModel):
