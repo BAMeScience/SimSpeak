@@ -170,22 +170,64 @@ with form_col:
     engine = st.selectbox('Target engine for generation', ENGINES)
     lammps_units = st.selectbox('LAMMPS unit system (generation-time choice)', ['Not specified', 'real', 'metal']) if engine == 'LAMMPS' else 'Not specified'
     selected_units = None if lammps_units == 'Not specified' else lammps_units
-    uploaded = st.file_uploader('Upload the structure file named in structure.source', type=['cif', 'xyz', 'vasp', 'poscar'])
+    structure_mode = st.radio('Structure source for generation', ['Generate standard crystal (ASE)', 'Upload structure file'], horizontal=True)
+    structure_bytes = None
+    structure_filename = None
+    structure_provenance = None
+    if structure_mode == 'Generate standard crystal (ASE)':
+        st.caption('All crystal parameters must be supplied explicitly. No lattice constant or supercell is assumed.')
+        element = st.text_input('Element symbol', value='', placeholder='Ar or Si')
+        crystal = st.selectbox('Crystal structure', ['Not specified', 'fcc', 'bcc', 'sc', 'diamond'])
+        lattice_text = st.text_input('Lattice parameter a (angstrom)', value='', placeholder='Required, e.g. 5.26')
+        repeat_text = st.text_input('Supercell repetitions (nx,ny,nz)', value='', placeholder='Required, e.g. 4,4,4')
+        source_identity = (structure_mode, element, crystal, lattice_text, repeat_text)
+    else:
+        uploaded = st.file_uploader('Upload a structure file', type=['cif', 'xyz', 'vasp', 'poscar'])
+        source_identity = (structure_mode, uploaded.name, uploaded.getvalue()) if uploaded else (structure_mode, None)
+    current_key = (spec.model_dump_json(), engine, selected_units, source_identity)
     if st.button('Generate input template ZIP'):
         from simspeak.qe_generator import GenerationBlocked
         try:
-            if uploaded is None:
-                raise GenerationBlocked('Upload the structure file first')
-            package = generate_engine_template(spec, uploaded.getvalue(), filename=uploaded.name, engine=engine, lammps_units=selected_units)
-        except GenerationBlocked as exc:
+            if structure_mode == 'Generate standard crystal (ASE)':
+                from simspeak.structure_sources import generate_crystal
+                if not lattice_text.strip() or not repeat_text.strip() or not element.strip() or crystal == 'Not specified':
+                    raise GenerationBlocked('Specify element, lattice parameter and all three supercell repetitions')
+                try:
+                    lattice = float(lattice_text)
+                    parts = [int(x.strip()) for x in repeat_text.split(',')]
+                except ValueError as exc:
+                    raise GenerationBlocked('Lattice parameter must be numeric and repetitions must be comma-separated integers') from exc
+                structure_bytes, structure_filename, structure_provenance = generate_crystal(element, crystal, lattice, tuple(parts))
+            else:
+                if uploaded is None:
+                    raise GenerationBlocked('Upload a structure file first')
+                structure_bytes, structure_filename = uploaded.getvalue(), uploaded.name
+            # Keep the universal four-field schema unchanged; generation-time structure
+            # provenance is recorded separately and never silently added to the JSON.
+            generation_spec = spec.model_copy(deep=True)
+            generation_spec.structure.source = structure_filename
+            package = generate_engine_template(generation_spec, structure_bytes, filename=structure_filename, engine=engine, lammps_units=selected_units)
+            if structure_provenance is not None:
+                from io import BytesIO
+                import zipfile
+                zip_buffer = BytesIO()
+                with zipfile.ZipFile(BytesIO(package.content)) as original, zipfile.ZipFile(zip_buffer, 'w', compression=zipfile.ZIP_DEFLATED) as output:
+                    for name in original.namelist():
+                        output.writestr(name, original.read(name))
+                    output.writestr('structure_generation.json', json.dumps(structure_provenance, indent=2))
+                    output.writestr(structure_filename, structure_bytes)
+                package_content = zip_buffer.getvalue()
+            else:
+                package_content = package.content
+        except (GenerationBlocked, ValueError) as exc:
             st.error(str(exc))
         else:
-            st.session_state.generated_package = package.content
-            st.session_state.generated_key = (spec.model_dump_json(), engine, selected_units, uploaded.name, uploaded.getvalue())
-            st.success('Non-runnable input template generated. Review unresolved items in generation_report.json.')
+            st.session_state.generated_package = package_content
+            st.session_state.generated_key = current_key
+            st.success('Input package generated. Review the generation report and any unresolved placeholders.')
     if st.session_state.get('generated_package') is not None:
-        if uploaded is not None and st.session_state.get('generated_key') == (spec.model_dump_json(), engine, selected_units, uploaded.name, uploaded.getvalue()):
-            st.download_button('Download input template ZIP', st.session_state.generated_package, file_name='simspeak-v0.2-inputs.zip', mime='application/zip')
+        if st.session_state.get('generated_key') == current_key:
+            st.download_button('Download input ZIP', st.session_state.generated_package, file_name='simspeak-v0.3-inputs.zip', mime='application/zip')
         else:
             st.warning('Inputs changed since generation. Generate again.')
     with st.expander('Verified extraction evidence'):
@@ -232,3 +274,43 @@ with chat_col:
             reply = f'No fields were updated: {exc}'
         st.session_state.messages.append({'role': 'assistant', 'content': reply})
         st.rerun()
+
+st.divider()
+st.header('v0.3 reference workflows')
+st.caption('Opt-in reproducible examples. No simulation is executed by SimSpeak.')
+ref_mode = st.radio('Reference package', ['Argon LJ / LAMMPS NPT', 'Silicon PBE / Quantum ESPRESSO SCF'])
+if ref_mode.startswith('Argon'):
+    from dataclasses import asdict
+    from simspeak.argon_reference import ArgonLJConfig
+    from simspeak.reference_workflows import argon_reference_from_spec
+    from pathlib import Path
+    example = json.loads((Path(__file__).parent / 'config' / 'argon_lj_example.json').read_text())
+    st.caption('Review the complete example parameterization. The temperature, pressure, timestep and steps come from your current JSON specification.')
+    st.json(example)
+    approved = st.checkbox('I approve the explicit argon reference parameters shown above')
+    if st.button('Prepare argon reference', disabled=not approved):
+        try:
+            data = argon_reference_from_spec(SimulationSpec.model_validate(st.session_state.spec), ArgonLJConfig(**example))
+        except (ValueError, TypeError) as exc:
+            st.error(str(exc))
+        else:
+            st.session_state.reference_download = ('argon-lammps.zip', data)
+else:
+    from simspeak.reference_workflows import silicon_qe_reference_from_spec
+    st.caption('Set the silicon structure filename, PBE, plane_wave basis, cutoff, k-point mesh and Si pseudopotential mapping in the universal JSON. Upload the matching structure and UPF here.')
+    silicon_structure = st.file_uploader('Silicon periodic structure', type=['cif', 'xyz'], key='silicon_structure')
+    silicon_pseudo = st.file_uploader('Silicon UPF pseudopotential', type=['UPF', 'upf'], key='silicon_pseudo')
+    if st.button('Prepare silicon QE reference'):
+        try:
+            if silicon_structure is None or silicon_pseudo is None:
+                raise ValueError('Upload both the silicon structure and the UPF file')
+            data = silicon_qe_reference_from_spec(SimulationSpec.model_validate(st.session_state.spec),
+                       silicon_structure.getvalue(), silicon_structure.name,
+                       silicon_pseudo.name, silicon_pseudo.getvalue())
+        except (ValueError, TypeError) as exc:
+            st.error(str(exc))
+        else:
+            st.session_state.reference_download = ('silicon-qe.zip', data)
+if st.session_state.get('reference_download'):
+    filename, payload = st.session_state.reference_download
+    st.download_button('Download reference package', payload, file_name=filename, mime='application/zip')

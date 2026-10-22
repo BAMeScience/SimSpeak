@@ -131,3 +131,11 @@ barostat, but remains non-runnable until force-field/topology and integration
 parameters are resolved. No scientific defaults are inserted.
 
 Regression coverage includes a combined chat-to-JSON-to-LAMMPS NPT template test.
+
+## v0.3 integrated reference workflows
+
+See [V03_RELEASE_REPORT.md](V03_RELEASE_REPORT.md). The Streamlit application now has two opt-in reference generators (argon LJ/LAMMPS NPT and silicon PBE/QE SCF). Reference parameters must be explicitly approved or supplied. Neither engine is run by the application. The reference packages are distinct from the conservative generic engine templates.
+
+### v0.3 structure-source update
+
+In **Generate engine input files**, choose **Generate standard crystal (ASE)** or **Upload structure file**. The generated-crystal option requires an element symbol, crystal type (FCC/BCC/simple cubic/diamond), lattice parameter in angstrom, and three integer supercell repetitions. All values must be explicitly entered; there are no scientific defaults. SimSpeak builds the crystal with ASE, exports a CIF, and bundles `structure_generation.json` with the generated input template. The universal JSON remains four-field; structure-builder choices are generation-time metadata. Upload remains supported for CIF/XYZ/POSCAR/VASP. A generated crystal does not automatically make the engine input runnable: missing force-field and pseudopotential settings are still reported.
