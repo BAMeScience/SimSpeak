@@ -35,6 +35,106 @@ Run tests
 uv run pytest -v
 ```
 
+### Ollama setup
+
+Follow the instructions in the [official docs](https://docs.ollama.com/).
+
+#### Install Ollama
+
+If not already installed, run:
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+```
+
+And start the Ollama server:
+```bash
+ollama serve
+```
+
+In another terminal, verify the installation
+```bash
+ollama --version
+```
+
+#### Download a model
+
+Run:
+```bash
+ollama pull <model-name>
+```
+
+Where `<model-name>` is defined as in the list of [Ollama supported models](https://ollama.com/search). For example, for Qwen3 4B:
+```bash
+ollama pull qwen3:4b
+```
+
+And check the installed models:
+```bash
+ollama list
+```
+
+#### Test the model independently
+
+The Ollama server is run in `localhost:11434`, and you can inspect the downloaded models in `http://localhost:11434/api/tags`.
+
+You can test a model in a chat version running:
+```bash
+ollama run <model-name>
+```
+
+E.g.:
+```bash
+ollama run qwen3:4b
+```
+And try:
+```bash
+Extract the chemical element, lattice parameter, and
+exchange-correlation functional from this description:
+
+Calculate silicon using PBE with a lattice parameter of 5.43 Å.
+```
+
+You can see the thinking process for the model, e.g.:
+```text
+<think>
+Okay, let's see. The user wants me to extract the chemical element,
+lattice parameter, and exchange-correlation functional from the
+description: "Calculate silicon using PBE with a lattice parameter of 5.43
+Å."
+
+First, I need to break down the sentence. The main subject is "Calculate
+silicon using PBE..." So the chemical element here is silicon, which is
+Si. The lattice parameter is given as 5.43 Å. The exchange-correlation
+functional is PBE, which stands for Perdew-Burke-Ernst.
+
+Wait, but I should confirm if PBE is the correct functional. PBE is indeed
+the standard for the exchange-correlation functional in density functional
+theory calculations. So the exchange-correlation functional is PBE.
+
+Let me check again. The description mentions using PBE, so that's the
+functional. The lattice parameter is 5.43 Å. The element is silicon. So
+the answer should be element: Si, lattice parameter: 5.43 Å,
+exchange-correlation functional: PBE.
+
+I think that's all. No other details are provided, so those three elements
+are the ones to extract.
+</think>
+
+The chemical element is **silicon (Si)**, the lattice parameter is **5.43
+Å**, and the exchange-correlation functional is **PBE**.
+
+**Extracted Information:**
+- **Chemical Element**: Si
+- **Lattice Parameter**: 5.43 Å
+- **Exchange-Correlation Functional**: PBE
+```
+
+End the interactive chat by typing:
+```bash
+/bye
+```
+
+
 ### Example implementation
 
 ```python

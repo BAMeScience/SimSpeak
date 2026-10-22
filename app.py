@@ -4,7 +4,7 @@ import httpx
 import streamlit as st
 from pydantic import ValidationError
 
-from simspeak.chat_backend import send_message
+from simspeak.chat_backend import process_simulation_message
 from simspeak.form import parse_form
 from simspeak.models import SimulationSpec, generation_issues
 
@@ -166,8 +166,8 @@ with form_col:
 with chat_col:
     st.subheader("Chat")
     st.caption(
-        "Messages go to `simspeak.chat_backend.send_message()` (mock for now). "
-        "Chat does not edit fields yet."
+        "Describe a DFT calculation or request changes "
+        "to the current simulation. Powered by local Ollama."
     )
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
@@ -178,10 +178,28 @@ with chat_col:
         with st.chat_message("user"):
             st.markdown(prompt)
         try:
-            reply = send_message(prompt, history=prior_history)
+            with st.spinner("Extracting simulation parameters..."):
+                result = process_simulation_message(
+                    message=prompt,
+                    current_spec=spec,
+                    history=prior_history,
+                )
+
         except Exception as exc:
-            st.error(f"Backend error: {exc}")
+            st.error(f"LLM error: {exc}")
+
         else:
-            st.session_state.messages.append({"role": "assistant", "content": reply})
-            with st.chat_message("assistant"):
-                st.markdown(reply)
+            st.session_state.spec = result.specification.model_dump(mode="json")
+
+            # The previous published specification is now outdated
+            if result.changes:
+                st.session_state.pop("published_spec_id", None)
+
+            st.session_state.messages.append(
+                {
+                    "role": "assistant",
+                    "content": result.reply,
+                }
+            )
+
+            st.rerun()
