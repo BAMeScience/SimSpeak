@@ -21,7 +21,7 @@ def test_missing_upload():
 
 
 def test_no_optimization_silent_mapping():
-    with pytest.raises(GenerationBlocked, match='single_point'):
+    with pytest.raises(GenerationBlocked, match='ionic optimizer'):
         generate_qe(spec(task={'type': 'optimize', 'parameters': {'fmax_ev_ang': 0.01}}), b'x', filename='silicon.cif')
 
 

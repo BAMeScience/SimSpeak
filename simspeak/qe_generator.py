@@ -31,14 +31,17 @@ def _positive(value, label):
     return float(value)
 
 
-def generate_qe(spec: SimulationSpec, structure_bytes: bytes, *, filename: str) -> QEPackage:
+def generate_qe(spec: SimulationSpec, structure_bytes: bytes, *, filename: str, ion_dynamics: str | None = None) -> QEPackage:
     """Produce a ZIP with pw.in, structure, manifest; never execute a calculation.
 
-    Only plane-wave ground-state single-point DFT is supported in this first adapter.
-    Optimization is blocked until convergence semantics are mapped explicitly.
+    Plane-wave single-point and fixed-cell geometry optimization are supported.
+    The optimization algorithm is a separate, explicit generation-time choice.
     """
-    if spec.method != 'dft' or spec.task.type != 'single_point':
-        raise GenerationBlocked('QE v0 adapter supports DFT single_point only; optimization and MD are not mapped')
+    if spec.method != 'dft' or spec.task.type not in ('single_point', 'optimize'):
+        raise GenerationBlocked('QE adapter supports DFT single_point and optimize only')
+    optimize = spec.task.type == 'optimize'
+    if optimize and ion_dynamics not in ('bfgs', 'damp'):
+        raise GenerationBlocked('Select QE ionic optimizer (bfgs or damp) explicitly for strict optimization generation')
     if spec.calculator.name not in (None, 'espresso'):
         raise GenerationBlocked('Selected calculator conflicts with Quantum ESPRESSO; choose espresso or leave it unspecified')
     if not spec.structure.source:
@@ -66,7 +69,7 @@ def generate_qe(spec: SimulationSpec, structure_bytes: bytes, *, filename: str) 
     try:
         from ase.io import read
         from ase.io.espresso import write_espresso_in
-        from ase.units import Rydberg
+        from ase.units import Rydberg, Bohr
     except ImportError as exc:
         raise GenerationBlocked('ASE must be installed to generate Quantum ESPRESSO input') from exc
     try:
@@ -82,19 +85,23 @@ def generate_qe(spec: SimulationSpec, structure_bytes: bytes, *, filename: str) 
         raise GenerationBlocked(f'Pseudopotential mapping must exactly cover {sorted(elements)}')
     # Do not invent an ecutrho, occupations, smearing, spin, or mixing scheme.
     # ASE's writer handles file syntax; user-supplied pseudo files are not bundled.
+    system = {'ecutwfc': cutoff / Rydberg, 'input_dft': xc}
+    input_data = {'control': {'calculation': 'relax' if optimize else 'scf'}, 'system': system}
+    if optimize:
+        fmax = _positive(spec.task.parameters.get('fmax_ev_ang'), 'Force tolerance (eV/Angstrom)')
+        input_data['control']['forc_conv_thr'] = fmax * Bohr / Rydberg
+        input_data['ions'] = {'ion_dynamics': ion_dynamics}
     stream = StringIO()
     try:
         write_espresso_in(
             stream, atoms, pseudopotentials=pseudos, kpts=tuple(mesh),
-            input_data={
-                'control': {'calculation': 'scf'},
-                'system': {'ecutwfc': cutoff / Rydberg, 'input_dft': xc},
-            },
+            input_data=input_data,
         )
     except Exception as exc:
         raise GenerationBlocked(f'ASE Quantum ESPRESSO writer failed: {exc}') from exc
     manifest = {
-        'engine': 'quantum_espresso', 'adapter': 'qe_single_point_v0',
+        'engine': 'quantum_espresso', 'adapter': 'qe_dft_v1',
+        'task': spec.task.type, 'ion_dynamics': ion_dynamics if optimize else None,
         'executed': False, 'scientifically_validated': False,
         'cutoff_input_ev': cutoff, 'kpoints_mesh': list(mesh),
         'pseudopotential_files_required': pseudos,

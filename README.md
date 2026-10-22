@@ -78,3 +78,56 @@ made that the resulting input is ready to execute.
 - **Strict** mode retains the earlier fully specified QE writer. Both modes are currently restricted to periodic DFT single-point calculations. Engine selection is not added to the universal four-field schema.
 - Chat can now accept explicit changes (`Actually use PBEsol instead`, `Change PBE to PBEsol`), clears (`Clear the XC functional`), and **Undo last change**. Conflicting new values without an explicit revision request are not applied. Each accepted edit records its prior state for undo.
 - No pseudopotential files are downloaded or selected automatically; no simulation is executed. Template placeholders are intentionally not executable QE syntax.
+
+### Quantum ESPRESSO geometry optimization (input generation)
+
+The ASE/QE adapter now supports `task.type: optimize` as a **fixed-cell ionic relaxation** (`calculation = 'relax'`), in addition to `single_point`. It translates `task.parameters.fmax_ev_ang` into QE's `forc_conv_thr` in Ry/Bohr. Template generation leaves missing scientific values and the QE-specific ionic optimizer as explicit `__REQUIRED_...__` markers and lists them in `generation_report.json`; the resulting file is **not runnable** until resolved. Strict generation requires the user to choose `bfgs` or `damp` as a generation-time option (outside the universal JSON). Cell relaxation (`vc-relax`) is not supported. No simulations are executed. ASE/Streamlit runtime behavior needs verification in an environment with those dependencies installed.
+
+## Integrated v0.2 preview: four-engine template generation
+
+The Streamlit generation panel now provides a common selection interface for **Quantum ESPRESSO, VASP, CP2K, and LAMMPS**. This is an integrated **template preview**, not a fully runnable multi-engine release. Engine selection is outside the four-field scientific schema. The ZIP includes `spec.json`, the uploaded structure, and `generation_report.json` with unresolved choices.
+
+| Engine | Supported draft | Generated files | Important limits |
+| --- | --- | --- | --- |
+| Quantum ESPRESSO | Periodic plane-wave DFT single-point / fixed-cell optimize | `pw.in` | Uses the existing ASE-backed structure reader; pseudopotentials, missing numerical settings and optimizer remain placeholders |
+| VASP | Periodic plane-wave DFT single-point / fixed-cell optimize | `INCAR`, `KPOINTS`, `POSCAR`, `POTCAR_REQUIRED.txt` | ASE writes POSCAR; POTCAR not generated; optimization algorithm and missing scientific settings unresolved |
+| CP2K | Periodic localized-basis GPW DFT single-point / optimize | `cp2k.inp` | Explicit basis/potential library placeholders; CP2K grid cutoff is not interchangeable with universal plane-wave cutoff; GPW implementation choices remain unresolved |
+| LAMMPS | Classical MD | `in.lammps` | Requires engine-specific atom style, units, data/topology, force-field mappings and integrator settings; not executable |
+
+**All four template types are marked non-runnable**, including templates with no unresolved placeholders: the generation report does not certify scientific completeness or compatibility. No simulation is executed. This release does not implement a universal automatic force-field conversion or pseudopotential retrieval. No arbitrary engine defaults are selected as scientific decisions. Existing chat editing and undo behavior are preserved.
+
+### Testing and known gaps
+
+Run `python -m pytest -q tests/` in an environment with the project dependencies installed. The v0.2 adapter regression tests cover placeholder reporting, task incompatibility, and structure source matching. ASE and Streamlit were unavailable in the development runtime; **the four-engine writers and interactive UI have not been end-to-end verified with actual installed dependencies**. Validate generated files against each engine before using them. The LAMMPS and CP2K outputs are intentionally skeletons, not fully translatable scientific input decks.
+
+## LAMMPS adapter improvements (coordinate export and explicit units)
+
+LAMMPS bundles now attempt to include `coordinates.extxyz` exported by ASE. This is **coordinate geometry only**, not a LAMMPS data file with bonded topology, force-field atom typing or charges. Accordingly `read_data` remains a placeholder. For a selected LAMMPS unit system (`real` or `metal`) the explicitly specified timestep in femtoseconds is converted to LAMMPS time units (fs or ps respectively); without a selection the timestep remains unresolved. The NVE ensemble maps to `fix ... nve`; NVT/NPT remain unresolved because coupling parameters and algorithms are not uniquely specified. The universal JSON is unchanged. Generated files are non-runnable templates and must not be executed without completing and validating all missing settings.
+
+### Barostat chat and LAMMPS NPT template (v0.2 update)
+
+Standalone prompts such as `Use a Berendsen barostat`, `Barostat: Monte Carlo`,
+`Change barostat to Nose-Hoover`, and `Clear the barostat` now update the
+universal `task.parameters.barostat` field. A barostat name does not imply an
+ensemble, pressure, or thermostat. Conflicting names in one prompt are rejected.
+
+LAMMPS NPT templates preserve explicitly supplied target pressure (bar and
+converted LAMMPS units), target temperature, thermostat, and barostat as
+comments. They deliberately do not invent a `fix npt` command or coupling
+constants. The generated bundle remains marked non-runnable until all engine
+and scientific requirements are resolved.
+
+## Consolidated v0.2 release (temperature + NPT adapter)
+
+This package consolidates the standalone temperature extraction regression fix,
+thermostat/barostat disambiguation, and the improved LAMMPS adapter into one app.
+Use **this extracted directory** when launching Streamlit; do not mix `app.py`
+with `simspeak/` modules from earlier ZIP releases.
+
+For LAMMPS, choose the **LAMMPS unit system** in the generation UI. With `real`
+units, 2 fs is written as `timestep 2.0`; with no selected units, a placeholder
+is retained. The NPT template records pressure, temperature, thermostat and
+barostat, but remains non-runnable until force-field/topology and integration
+parameters are resolved. No scientific defaults are inserted.
+
+Regression coverage includes a combined chat-to-JSON-to-LAMMPS NPT template test.

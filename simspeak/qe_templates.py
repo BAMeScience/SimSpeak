@@ -3,6 +3,7 @@ from __future__ import annotations
 from io import BytesIO
 from pathlib import Path
 import json
+import math
 import zipfile
 from simspeak.models import SimulationSpec
 from simspeak.qe_generator import QEPackage, GenerationBlocked
@@ -10,8 +11,8 @@ from simspeak.qe_generator import QEPackage, GenerationBlocked
 PLACEHOLDER = '__REQUIRED_{name}__'
 
 def generate_qe_template(spec: SimulationSpec, structure_bytes: bytes, *, filename: str) -> QEPackage:
-    if spec.method not in (None, 'dft') or spec.task.type not in (None, 'single_point'):
-        raise GenerationBlocked('Template adapter supports only DFT single_point (or unspecified method/task).')
+    if spec.method not in (None, 'dft') or spec.task.type not in (None, 'single_point', 'optimize'):
+        raise GenerationBlocked('Template adapter supports DFT single_point and optimize (or unspecified method/task).')
     if spec.calculator.name not in (None, 'espresso'):
         raise GenerationBlocked('Calculator conflicts with Quantum ESPRESSO')
     if not filename or Path(filename).name != filename or not structure_bytes:
@@ -20,7 +21,7 @@ def generate_qe_template(spec: SimulationSpec, structure_bytes: bytes, *, filena
         raise GenerationBlocked('Structure filename does not match structure.source')
     try:
         from ase.io import read
-        from ase.units import Rydberg
+        from ase.units import Rydberg, Bohr
     except ImportError as exc:
         raise GenerationBlocked('Install ASE to read the structure and generate templates') from exc
     try:
@@ -69,12 +70,25 @@ def generate_qe_template(spec: SimulationSpec, structure_bytes: bytes, *, filena
             raise GenerationBlocked('Pseudopotential filenames must be simple filenames')
         mass = next(atom.mass for atom in atoms if atom.symbol == element)
         species_lines.append(f'{element} {mass:.8f} {pseudo}')
+    # QE's forc_conv_thr is in Ry/Bohr; the universal force tolerance is eV/Angstrom.
+    optimize = spec.task.type == 'optimize'
+    ions_lines = []
+    if optimize:
+        tolerance = spec.task.parameters.get('fmax_ev_ang')
+        if tolerance is None:
+            force_ry_bohr = required('task.parameters.fmax_ev_ang', PLACEHOLDER.format(name='FORCE_TOLERANCE_RY_PER_BOHR'))
+        elif isinstance(tolerance, bool) or not isinstance(tolerance, (float, int)) or not math.isfinite(tolerance) or tolerance <= 0:
+            raise GenerationBlocked('Force tolerance must be a positive finite number in eV/Angstrom')
+        else:
+            force_ry_bohr = f'{tolerance * Bohr / Rydberg:.12g}'
+        # Ionic optimizer is a generation-time engine-specific choice, not a universal schema field.
+        ions_lines = ['&IONS', '  ion_dynamics = ' + required('generation.ion_dynamics', PLACEHOLDER.format(name='QE_ION_DYNAMICS')), '/']
     # ecutrho, occupations, spin, smearing, convergence, etc. are not invented.
     lines = ['! SimSpeak template: NOT RUNNABLE until placeholders and required settings are resolved',
-             '&CONTROL', "  calculation = 'scf'", '/', '&SYSTEM',
+             '&CONTROL', "  calculation = 'relax'" if optimize else "  calculation = 'scf'", *([f'  forc_conv_thr = {force_ry_bohr}'] if optimize else []), '/', '&SYSTEM',
              f'  ibrav = 0', f'  nat = {len(atoms)}', f'  ntyp = {len(elements)}',
              f"  input_dft = '{xc}'" if not xc.startswith('__') else f'  input_dft = {xc}',
-             f'  ecutwfc = {cutoff_ry}', '/', '&ELECTRONS', '/', 'ATOMIC_SPECIES', *species_lines,
+             f'  ecutwfc = {cutoff_ry}', '/', '&ELECTRONS', '/', *ions_lines, 'ATOMIC_SPECIES', *species_lines,
              'CELL_PARAMETERS angstrom']
     lines += [' '.join(f'{x:.12g}' for x in row) for row in atoms.cell.array]
     lines += ['ATOMIC_POSITIONS angstrom']
@@ -83,7 +97,7 @@ def generate_qe_template(spec: SimulationSpec, structure_bytes: bytes, *, filena
     if spec.method is None:
         required('method', PLACEHOLDER.format(name='METHOD_DFT_CONFIRMATION'))
     if spec.task.type is None:
-        required('task.type', PLACEHOLDER.format(name='SINGLE_POINT_CONFIRMATION'))
+        required('task.type', PLACEHOLDER.format(name='TASK_TYPE_CONFIRMATION'))
     # Report required confirmations even when they are not valid QE input keywords.
     report = {'engine': 'quantum_espresso', 'mode': 'template', 'executed': False,
               'runnable': False, 'scientifically_validated': False,

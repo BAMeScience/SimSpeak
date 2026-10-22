@@ -115,7 +115,7 @@ with form_col:
             if thermostat: task_parameters['thermostat'] = thermostat
         if ensemble == 'npt':
             pressure = number_text('Pressure (bar)', tp.get('pressure_bar'))
-            barostat = choice('Barostat', ['nose_hoover', 'berendsen'], tp.get('barostat'))
+            barostat = choice('Barostat', ['nose_hoover', 'berendsen', 'parrinello_rahman', 'monte_carlo'], tp.get('barostat'))
             if barostat: task_parameters['barostat'] = barostat
     elif method == 'dft' and task == 'optimize':
         fmax = number_text('Force tolerance (eV/Å)', tp.get('fmax_ev_ang'))
@@ -165,31 +165,29 @@ with form_col:
     else:
         st.caption('Minimal schema and registry checks passed. Not an execution guarantee.')
     st.subheader('Generate engine input files')
-    st.caption('Quantum ESPRESSO preview: DFT single-point only. No simulation execution or scientific defaults.')
-    engine = st.selectbox('Target engine for generation', ['Quantum ESPRESSO'])
+    st.caption('v0.2 multi-engine templates. Never executes simulations; unresolved settings remain placeholders.')
+    from simspeak.engine_adapters import ENGINES, generate_engine_template
+    engine = st.selectbox('Target engine for generation', ENGINES)
+    lammps_units = st.selectbox('LAMMPS unit system (generation-time choice)', ['Not specified', 'real', 'metal']) if engine == 'LAMMPS' else 'Not specified'
+    selected_units = None if lammps_units == 'Not specified' else lammps_units
     uploaded = st.file_uploader('Upload the structure file named in structure.source', type=['cif', 'xyz', 'vasp', 'poscar'])
-    generation_mode = st.radio('Generation mode', ['Template (allow missing parameters)', 'Strict (require complete parameters)'])
-    if st.button('Generate QE input ZIP'):
-        from simspeak.qe_generator import GenerationBlocked, generate_qe
+    if st.button('Generate input template ZIP'):
+        from simspeak.qe_generator import GenerationBlocked
         try:
             if uploaded is None:
                 raise GenerationBlocked('Upload the structure file first')
-            if generation_mode.startswith('Template'):
-                from simspeak.qe_templates import generate_qe_template
-                package = generate_qe_template(spec, uploaded.getvalue(), filename=uploaded.name)
-            else:
-                package = generate_qe(spec, uploaded.getvalue(), filename=uploaded.name)
+            package = generate_engine_template(spec, uploaded.getvalue(), filename=uploaded.name, engine=engine, lammps_units=selected_units)
         except GenerationBlocked as exc:
             st.error(str(exc))
         else:
-            st.session_state.qe_package = package.content
-            st.session_state.qe_spec = spec.model_dump(mode='json')
-            st.success('Input files generated; no simulation was run.')
-    if st.session_state.get('qe_package') is not None:
-        if st.session_state.get('qe_spec') == spec.model_dump(mode='json'):
-            st.download_button('Download QE input ZIP', st.session_state.qe_package, file_name='simspeak-qe-inputs.zip', mime='application/zip')
+            st.session_state.generated_package = package.content
+            st.session_state.generated_key = (spec.model_dump_json(), engine, selected_units, uploaded.name, uploaded.getvalue())
+            st.success('Non-runnable input template generated. Review unresolved items in generation_report.json.')
+    if st.session_state.get('generated_package') is not None:
+        if uploaded is not None and st.session_state.get('generated_key') == (spec.model_dump_json(), engine, selected_units, uploaded.name, uploaded.getvalue()):
+            st.download_button('Download input template ZIP', st.session_state.generated_package, file_name='simspeak-v0.2-inputs.zip', mime='application/zip')
         else:
-            st.warning('Specification changed since generation. Generate again.')
+            st.warning('Inputs changed since generation. Generate again.')
     with st.expander('Verified extraction evidence'):
         st.json(st.session_state.extraction_evidence)
         for note in st.session_state.extraction_notes:

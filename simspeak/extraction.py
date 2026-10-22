@@ -125,13 +125,68 @@ def extract_verified(text: str) -> ExtractionResult:
     elif len(step_values) > 1:
         notes.append('Conflicting step counts: steps left unspecified.')
 
+    # Pressure is a standalone MD parameter. Convert explicit absolute-pressure
+    # units to bar; do not infer a barostat or an NPT ensemble.
+    pressure_pattern = (
+        r'\b(?:target\s+|external\s+)?pressure\s*(?:is|of|to|at|=|:)?\s*'
+        r'([0-9]+(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?)\s*'
+        r'(bar|bars|atm|atmospheres?|kPa|MPa|Pa)\b'
+        r'|\b([0-9]+(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?)\s*'
+        r'(bar|bars|atm|atmospheres?|kPa|MPa|Pa)\s+(?:target\s+)?pressure\b'
+    )
+    pressure_hits = list(re.finditer(pressure_pattern, text, re.I))
+    factors = {'bar': 1, 'bars': 1, 'atm': 1.01325,
+               'atmosphere': 1.01325, 'atmospheres': 1.01325,
+               'kpa': 0.01, 'mpa': 10, 'pa': 1e-5}
+    pressure_values = []
+    for m in pressure_hits:
+        amount = m.group(1) or m.group(3)
+        unit = (m.group(2) or m.group(4)).lower()
+        pressure_values.append((float(amount) * factors[unit], m))
+    if pressure_values and len({round(v, 10) for v, _ in pressure_values}) == 1:
+        value, match = pressure_values[0]
+        put('task.parameters.pressure_bar', value, match.group())
+    elif len({round(v, 10) for v, _ in pressure_values}) > 1:
+        notes.append('Conflicting pressure values: target pressure left unspecified.')
+    elif re.search(r'\bpressure\b', text, re.I):
+        notes.append('Target pressure requires an explicit value and supported unit (bar, atm, Pa, kPa, MPa).')
+
+    # Barostat names require explicit barostat context. Never infer an ensemble,
+    # target pressure, or thermostat from the selected pressure-control family.
+    barostat_aliases = {
+        'nose_hoover': r'\bNos[eé][\s_-]*Hoover\b',
+        'berendsen': r'\bBerendsen\b',
+        'parrinello_rahman': r'\bParrinello[\s_-]*Rahman\b',
+        'monte_carlo': r'\b(?:Monte[\s_-]*Carlo|MC)\b',
+    }
+    barostat_hits = []
+    if re.search(r'\bbarostat\b', text, re.I):
+        for name, pattern in barostat_aliases.items():
+            for m in re.finditer(pattern, text, re.I):
+                # Match either "use Berendsen barostat" or "barostat: Berendsen".
+                before, after = text[:m.start()], text[m.end():]
+                if (re.search(r'\bbarostat\b(?:\s+(?:is|to|as|set\s+to)|\s*[:=])?\s*$', before, re.I)
+                        or re.match(r'\s+barostat\b', after, re.I)):
+                    barostat_hits.append((name, m))
+    barostat_names = {name for name, _ in barostat_hits}
+    if len(barostat_names) == 1 and barostat_hits:
+        name, match = barostat_hits[0]
+        put('task.parameters.barostat', name, match.group())
+    elif len(barostat_names) > 1:
+        notes.append('Conflicting barostat selections: barostat left unspecified.')
+    elif re.search(r'\bbarostat\b', text, re.I):
+        notes.append('Barostat mentioned without a supported explicit type.')
+
     thermostat_aliases = {
         'nose_hoover': r'\bNos[eé][\s_-]*Hoover\b',
         'langevin': r'\bLangevin\b',
         'berendsen': r'\bBerendsen\b',
     }
     thermostat_hits = [(name, m) for name, pattern in thermostat_aliases.items()
-                       for m in re.finditer(pattern, text, re.I)]
+                       for m in re.finditer(pattern, text, re.I)
+                       if (not any(m.start() == b.start() and m.end() == b.end() for _, b in barostat_hits)
+                           and (name == 'langevin' or re.search(r'\bthermostat\b[^.!?;]*$', text[:m.start()], re.I)
+                                or re.match(r'\s+thermostat\b', text[m.end():], re.I)))]
     thermostat_names = {name for name, _ in thermostat_hits}
     if len(thermostat_names) == 1 and thermostat_hits:
         name, match = thermostat_hits[0]
@@ -193,11 +248,15 @@ def extract_verified(text: str) -> ExtractionResult:
         ensembles = list(re.finditer(r'\b(?:NVE|NVT|NPT)\b', text, re.I))
         if len({m.group().lower() for m in ensembles}) == 1 and ensembles:
             put('task.parameters.ensemble', ensembles[0].group().lower(), ensembles[0].group())
-        temp_hits = list(re.finditer(r'\b(\d+(?:\.\d+)?)\s*(?:K|kelvin)\b', text, re.I))
-        if len(temp_hits) == 1:
-            put('task.parameters.temperature_K', float(temp_hits[0].group(1)), temp_hits[0].group())
-        elif len(temp_hits) > 1:
-            notes.append('Multiple temperatures: left unspecified.')
+    # Temperature is an independent MD setting. Standalone follow-ups must not
+    # require the user to repeat MD/NVT/NPT. Avoid interpreting an unrelated
+    # Kelvin value as a target unless the temperature context is explicit.
+    temp_hits = list(re.finditer(r'(?<![\w.])(\d+(?:\.\d+)?)\s*(?:K|kelvin)\b', text, re.I))
+    temperature_context = bool(re.search(r'\b(?:temperature|temp|target\s+temp|at\s+\d+(?:\.\d+)?\s*(?:K|kelvin)\b)\b', text, re.I))
+    if len(temp_hits) == 1 and (temperature_context or patch.get('method') == 'classical_md'):
+        put('task.parameters.temperature_K', float(temp_hits[0].group(1)), temp_hits[0].group())
+    elif len(temp_hits) > 1:
+        notes.append('Multiple temperatures: left unspecified.')
     # XC is an explicit calculator setting even if 'DFT' was not said.
     if patch.get('method') != 'classical_md':
         xc_hits = [(name, m) for name in ('PBEsol', 'PBE', 'LDA') if (m := _match(text, r'\b' + name + r'\b'))]

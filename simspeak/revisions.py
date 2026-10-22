@@ -70,6 +70,13 @@ def apply_chat_revision(current: SimulationSpec, message: str, *, use_ollama=Fal
         m = re.search(r"\b(?:to|with)\s+(.+)$", message, re.I)
         if m:
             target = m.group(1)
+            # Preserve the named field for standalone numeric revisions.
+            if re.search(r'\bpressure\b', message, re.I) and not re.search(r'\bpressure\b', target, re.I):
+                target = 'pressure is ' + target
+            if re.search(r'\btemperature\b', message, re.I) and not re.search(r'\btemperature\b', target, re.I):
+                target = 'temperature is ' + target
+            if re.search(r'\bbarostat\b', message, re.I) and not re.search(r'\bbarostat\b', target, re.I):
+                target = 'barostat: ' + target
     result = extract(target, use_ollama=use_ollama)
     notes.extend(result.notes)
     proposals = list(_leaves(result.patch))
